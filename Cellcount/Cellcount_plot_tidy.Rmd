@@ -1,0 +1,83 @@
+---
+title: "ReTake_Cellcounts"
+author: "Dominik"
+date: "2024-07-05"
+output: html_document
+---
+
+install the packages
+```{r}
+install.packages("tidyverse")
+install.packages("ragg")
+install.packages("textshaping")
+```
+
+load packages
+```{r}
+library("ggplot2")
+library("tidyverse")
+```
+
+Set the working directory to the file on you pc, where the "cellcount_data.csv" file is located and import the file into R
+here you need to change the code in the setwd() function to make it work.
+
+```{r}
+setwd("/changeworkingdirectory")# change directory here
+Count_data_raw <- read.csv("cellcount_data.csv", sep ="\t" )
+```
+
+manipulate the table so it is nicely plotable in GGplot 
+
+```{r}
+Count_data <- as.data.frame(t(Count_data_raw))# transpose it is for me more comfortable to have the mesocosms as columns and the day as rows
+colnames(Count_data) <- Count_data[1,]# change the colnames accordingly to the mesocosm treatment
+Count_data <- Count_data[-1,] #remove the first column
+
+Day <- rownames(Count_data) #extract the rownames
+Day_order <- substr(Day,2,nchar(Day))# and order them
+Treatment_order <- c("0 D","250 D","500 D", "750 D", "1000 D", "1250 D",
+                     "0 I","250 I","500 I", "750 I", "1000 I", "1250 I") # also order the Treatments 
+
+Plot_df<- cbind(Count_data,Day_order)
+Plot_df_tidy <- Plot_df %>% 
+  pivot_longer(cols = colnames(Count_data) , names_to = "Treatment", values_to = "Value")  
+
+#set the columns to have the correct data type for plotting
+Plot_df_tidy$Day_order <- factor(Plot_df_tidy$Day_order, levels = Day_order)
+Plot_df_tidy$Treatment <- factor(Plot_df_tidy$Treatment, levels = Treatment_order )
+Plot_df_tidy$Value <- as.numeric(Plot_df_tidy$Value) 
+
+```
+Program the lines types and the colors for the different treatments
+```{r}
+line_type <- c("0 D"= "dashed","250 D" = "dashed","500 D"= "dashed", "750 D"= "dashed", 
+                 "1000 D" = "dashed","1250 D"= "dashed", "0 I" = "solid", "250 I" = "solid", 
+                 "500 I" = "solid", "750 I" = "solid","1000 I" = "solid","1250 I" = "solid") 
+
+color_scheme <- c("#A6D96A", "#83DD8F","#1ABD63", "#008E4A", "#007200", "#1B4332",
+                              "#90E0EF","#00B4D8" ,"#4393C2", "#0077B6", "#0466C8", "#03045E")
+```
+
+Plot the cellcount Grapth
+```{r}
+Cellcount_plot<- ggplot(Plot_df_tidy, aes(Day_order,Value, color = Treatment), ylab="Cells / µL", linetype = line_type) +
+  scale_color_manual(values=color_scheme) +
+  geom_point(group=Plot_df_tidy$Treatment, size = 5) + 
+  geom_line(group=Plot_df_tidy$Treatment, linewidth = 2) +
+  scale_shape_manual(values=c(25,23,22,21,24,8,25,23,22,21,24,8)) +
+  scale_linetype_manual()+
+  scale_y_continuous(limits = c(0,4000))+
+  labs(x="Day", y="Cells / µL", title = "Prokaryotic Cellcounts" )+
+  theme(panel.grid = element_blank())+
+  theme(axis.title = element_text(size = 20))+
+  theme(axis.text = element_text(size = 16))+ 
+  theme(legend.title = element_text(size = 20))+
+  theme(legend.text = element_text(size = 16))
+
+```
+
+save the plot in the working directory
+```{r}
+ggsave("Cellcount_plot.png", Cellcount_plot, dpi = 300, width = 18, height = 14)
+
+```
