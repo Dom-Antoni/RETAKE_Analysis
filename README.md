@@ -17,3 +17,5 @@ Run the script to reproduce the analysis.
 Enjoy:)!
 
 Dominik
+
+Edit: I uploaded 2 new R-Markdown files into the Ecological analysis and the Cellcount folders. These represent newer versions of the analysis. Feel free to ignore the older versions of the R-code. I want to keep them so the workflow is reconstructable.  
