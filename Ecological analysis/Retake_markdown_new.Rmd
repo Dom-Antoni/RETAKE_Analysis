@@ -1,0 +1,902 @@
+---
+title: "Retake_Statistics_full"
+author: "Dominik Antoni"
+date: "2024-02-19"
+output: html_document
+---
+
+install all the necessary packages
+
+```{r message=FALSE}
+
+
+if (!require("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+BiocManager::install("phyloseq")
+BiocManager::install("msa")
+BiocManager::install("ggtree")
+install.packages("remotes")
+BiocManager::install("microbiome")
+install.packages("devtools")
+library(devtools)
+install_github("microbiome/microbiome") # Install the packagein
+install.packages("viridis")
+install.packages("ggtree")
+install_github("microbiota/amplicon")
+install.packages("microbiome")
+install.packages('installr')
+install.packages("ggplot2")
+install.packages("tidyr")
+install.packages("tidyverse")
+install.packages("phyloseq")
+install.packages("vegan")
+install.packages("data.table")
+install.packages("msa")
+install.packages("remotes")
+install.packages("seqinr")
+install.packages("rBLAST")
+install.packages('rBLAST', repos = 'https://mhahsler.r-universe.dev')
+install.packages("ggfortify")
+install.packages("remotes")
+remotes::install_github("jfq3/QsRutils")
+install.packages("clustsig")
+install.packages("factoextra")
+install.packages("ggforce")
+install_github("pmartinezarbizu/pairwiseAdonis/pairwiseAdonis")
+install.packages("car")
+install.packages("Matrix")
+
+```
+
+load the packages 
+```{r echo=, message=FALSE}
+
+library("remotes")
+library("seqinr")
+library("remotes")
+library("msa")
+library("ape")
+library("ggtree")
+library("viridis")
+library("microbiome")  
+library("remotes")
+library("amplicon")
+library("microbiome")
+library("installr")
+library("phyloseq")
+library("amplicon")
+library("vegan")
+library("tidyverse")
+library("factoextra")
+library("ggforce")
+library("cluster")
+library("pairwiseAdonis")
+library("car")
+
+```
+
+load in the raw data tables -- Run once
+change the directory in the "setwd()" function to the folder where you downloaded the files
+
+```{r}
+setwd("C:\Users\dantoni\Documents\PhDominik\RETAKE_Helgoland2023\Script\R_scripts\Ecological analysis")
+meta_data <- read.csv("metadata.tsv", sep = "\t") #meta Data
+count_table <- read.csv("ASVs_counts.tsv", sep = "\t") #count data
+tax_table <- read.csv("ASVs_taxonomy.tsv", sep ="\t")#Taxonomy table
+Chla_data <- read.csv("Chla_.csv", sep = "\t") #ChlA concentration 
+```
+
+remove Eukaryotas, Archaea and Chloroplast data from tax_table and count_table -- Run once
+```{r}
+tax_table_filtered <- tax_table %>%
+  filter(!grepl("Chloroplast", order)) %>%
+  filter(!grepl("Archaea", domain)) %>%
+  filter(!grepl("Eukaryota", domain))
+
+count_table_filtered <- subset(count_table, X %in% tax_table_filtered$X)
+```
+
+make the three tables linkable to join them in a phyloseq object. -- Run once. The chunk will not work properly if run a second time. This is because I use in some operations the same name for the input and output file. This will disrupt the working of some chunks below. 
+
+```{r}
+#Taxtable needs to have the ASVs as Rownames
+row.names(tax_table_filtered) <- tax_table_filtered$X
+tax_table_filtered <-  tax_table_filtered %>%
+  select(-X)
+
+#the count_table needs the Sample names from the meta_data table as column names they need to be uppercase
+#to match the meta data name
+colnames(count_table_filtered) <-   toupper(colnames(count_table_filtered))
+
+#the count table also needs the ASVs as rownames
+rownames(count_table_filtered) <- count_table_filtered$X
+count_table_filtered <- count_table_filtered %>%
+  select(-X) 
+
+#merge meta data with Chla table
+#make samples column from meta data uppercase to match the colnames from count table
+
+meta_data$Sample <-  str_to_upper(meta_data$Sample)
+meta_data <- merge(meta_data,Chla_data, by= "Sample")
+meta_data$Chla_ng.l <- gsub(",",".", meta_data$Chla_ng.l)
+row.names(meta_data) <- meta_data$Sample 
+
+#look at the three output tables
+head(meta_data)
+head(count_table_filtered)
+head(tax_table_filtered)
+
+
+```
+
+square root transfrom the count table data for bray curtis dissimilarty distance calculation and rarefy the data
+
+```{r}
+#square root transform
+count_table_filtered_sqrt <- sqrt(count_table_filtered)
+#rarefy  
+count_table_rarefyed <- t(rrarefy(t(ceiling(count_table_filtered_sqrt)), sample = floor(min(colSums((count_table_filtered_sqrt))))))
+
+```
+
+generate a phyloseq object out of the three tables
+
+```{r}
+Phyloseq_rarefy <- phyloseq(otu_table(count_table_rarefyed, taxa_are_rows =T ),
+                    sample_data(meta_data),
+                    tax_table(as.matrix(tax_table_filtered)))
+```
+
+Make alpha diversity plots of the richness 
+```{r}
+
+p_alpha <- plot_richness(Phyloseq_rarefy, measures = c("Observed","Shannon","Simpson"))+
+  scale_color_viridis(option = "C") +
+  theme(panel.grid = element_blank())+
+  scale_x_discrete(expand = c(0.1,0),breaks = NULL)+
+  labs(x="Samples")+
+  geom_point(size=3)
+
+data_alpha_diversity <- p_alpha$data
+data_alpha_diversity$day <- as.factor(data_alpha_diversity$day)
+data_alpha_diversity$variable <- gsub("Observed","Richness",data_alpha_diversity$variable)
+
+p_alpha_boxplot <- ggplot(data_alpha_diversity, aes(x= day, y= value))+
+  facet_wrap(~variable, scales = "free_y")+
+  geom_boxplot(show.legend = F)+ 
+  ggtitle("Alpha-diversity measures")+
+  labs(x = "Incubation Time")+
+  theme(panel.grid = element_blank())+
+  theme(strip.text = element_text(size = 14))+
+  theme(axis.text = element_text(size = 16))+
+  theme(axis.text = element_text(size = 16))+
+  theme(axis.title = element_text(size = 20))+
+  theme(plot.title = element_text(size = 24))
+
+p_alpha_boxplot
+ggsave("Alphadiversity.png", p_alpha_boxplot, dpi = 300, width = 14, height = 7)
+
+```
+
+make a PCoA to asses the beta diversity between samples 
+```{r}
+#for the PCoA the day factor needs to be a factor 
+meta_data$day <-  as.factor(meta_data$day)
+sample_data(Phyloseq_rarefy) <- meta_data
+vst_pcoa <- ordinate(Phyloseq_rarefy, method="PCoA", distance = "bray")
+p_Pcoa_BC <- plot_ordination(Phyloseq_rarefy,vst_pcoa, color = "day") +
+  scale_color_viridis(discrete = TRUE, option = "D")+
+  ggtitle("Bray Curtis Distance PCoA")+
+  geom_point(size = 6)+
+  labs(color ="Incubation Time")+
+  theme(panel.grid = element_blank())+
+  theme(strip.text = element_text(size = 14))+
+  theme(axis.text = element_text(size = 16))+
+  theme(axis.text = element_text(size = 16))+
+  theme(axis.title = element_text(size = 20))+
+  theme(plot.title = element_text(size = 24))+
+  theme(legend.title = element_text(size = 20 ))+
+  theme(legend.text = element_text(size= 16))
+
+p_Pcoa_BC
+ggsave("PCoA_BC.png", p_Pcoa_BC, width=14, height = 8)
+
+```
+
+make a NMDS with the same parameters and the the ordination for statistical testing
+```{r}
+
+
+#get the orginations in a variable called PCoA_data
+PCoA_data <- p_Pcoa_BC$data
+PCoA_ordination <- PCoA_data[,1:2]
+
+PCoA_data_treatment <- PCoA_data %>%
+  filter(!is.na(Treatment)) 
+
+centroid_treatment <- PCoA_data_treatment %>%
+  group_by(Treatment) %>%
+  summarize(Axis.1 = mean(Axis.1),
+            Axis.2 = mean(Axis.2), .groups ="drop")
+
+
+  
+
+PCoA_Treatment <- ggplot(PCoA_data_treatment, aes(x=Axis.1, y=Axis.2, color=Treatment))+
+  geom_point(size=3)+
+  geom_point(data=centroid_treatment, aes(x=Axis.1, y=Axis.2, fill = Treatment, size=6), shape=22,
+             show.legend = F, color = "black")+
+  ggtitle("PCoA Bray Curtis distance ~ Treatment")+
+  #stat_ellipse(show.legend = F)+
+  theme(panel.grid = element_blank())+
+  labs(x="Axis.1 [29%]", y="Axis.2 [14.4%]")
+PCoA_Treatment
+ggsave("PCoA_Treatment.png", PCoA_Treatment, width = 10, height = 8)
+```
+
+make a similar plot for the day of the sampling as visualized parameter 
+```{r}
+
+PCoA_data_day <- PCoA_data %>%
+  filter(!startsWith(Sample,"T0")) 
+
+
+centroid_day <- PCoA_data_day %>%
+  group_by(day) %>%
+  summarize(Axis.1 = mean(Axis.1),
+            Axis.2 = mean(Axis.2), .groups ="drop")
+
+
+
+PCoA_day <- ggplot(PCoA_data_day, aes(x=Axis.1, y=Axis.2, color=day))+
+  geom_point(size=5)+
+  geom_point(data=centroid_day, aes(x=Axis.1, y=Axis.2, fill = day), size =6 , shape=22,
+             show.legend = F, color = "black")+
+  ggtitle("PCoA Bray Curtis distance ~ Time")+
+  #stat_ellipse(show.legend = F)+
+  theme(panel.grid = element_blank())+
+  labs(x="Axis.1 [29%]", y="Axis.2 [14.4%]")
+PCoA_day
+ggsave("PCoA_day.png", PCoA_day, width = 10, height = 8)
+
+```
+
+make the same plot one last time for the d_alkalinity treatment 
+```{r}
+
+PCoA_data_d_Alk <- PCoA_data %>%
+  filter(!startsWith(Sample,"T0")) 
+
+
+PCoA_data_d_Alk$d_Alk <- as.factor(PCoA_data_d_Alk$d_Alk)
+centroid_d_Alk <- as.data.frame(PCoA_data_d_Alk) %>%
+  group_by(d_Alk) %>%
+  summarize(Axis.1 = mean(Axis.1),
+            Axis.2 = mean(Axis.2), .groups ="drop")
+
+PCoA_Alk <- ggplot(PCoA_data_d_Alk, aes(x=Axis.1, y=Axis.2, color=d_Alk))+
+  geom_point(size=5)+
+  geom_point(data=centroid_d_Alk, aes(x=Axis.1, y=Axis.2, fill = d_Alk), size =6 , shape=22,
+             show.legend = F, color = "black")+
+  ggtitle("PCoA Bray Curtis distance ~ added Alkalinity")+
+  #stat_ellipse(show.legend = F)+
+  theme(panel.grid = element_blank())+
+  labs(x="Axis.1 [29%]", y="Axis.2 [14.4%]", color= "added Alkalinity")
+
+PCoA_Alk
+ggsave("PCoA_Alk.png", PCoA_Alk, width = 10, height = 8)
+```
+
+#make a Permanova called ADONIS in the vegan package
+```{r}
+
+#centroid test
+#remove t0 from meta data and make a counttable with the removed samples
+meta_data_statistical_test <- meta_data %>%
+  filter(!startsWith(Sample,"T0")) 
+#counttable
+count_table_statistical_test <- count_table_rarefyed[,colnames(count_table_rarefyed) %in% rownames(meta_data_statistical_test)]
+
+#make a distance matrix out of the counttable
+rare_dist <- vegdist(t(count_table_statistical_test)) %>%
+  as.dist()
+
+meta_data_statistical_test$d_Alk <- as.factor(meta_data_statistical_test$d_Alk)
+meta_data_statistical_test$day <- as.factor(meta_data_statistical_test$day)
+
+#write a function which adds a "*" if a value is significant 
+
+Significante_indicator <- function(data, column,pvalue_threshold = 0.05) {
+  # Check if column exists
+  if (!column %in% colnames(data)){
+    stop("Column does not exist in the provided data frame")
+  }
+  
+  #Extract the specified column
+  p_values <- data[[column]]
+  
+  #check if column contains p_values 
+  if(!all(p_values>=0 & p_values <=1)){
+    stop("The Column does not contain p_values (numeric between 0 and 1)")
+  }
+  
+  # Add a new column indicating significanve 
+  
+  data$Sginificance <- ifelse(p_values < pvalue_threshold, "*", "" )
+  
+  return(data)
+
+}
+
+
+
+adonist_result_day <- adonis2(rare_dist~day, data=meta_data_statistical_test, permutations = 1000)
+adonis_table_dalk <- adonis2(rare_dist~d_Alk, data=meta_data_statistical_test, permutations = 1000)
+adonis_table_dalk_day <- adonis2(rare_dist~d_Alk*day, data=meta_data_statistical_test, permutations = 1000)
+adonist_table_Treatment <- adonis2(rare_dist~Treatment, data=meta_data_statistical_test, permutations = 1000)
+
+
+
+variable_tested <- cbind(c("Added Alkalinity","Incubation Time", "Treatment"))
+Adonis_pvalues <- cbind(c(adonis_table_dalk_day$`Pr(>F)`[1],
+                          adonis_table_dalk$`Pr(>F)`[1],
+                          adonist_table_Treatment$`Pr(>F)`[1]))  %>%
+  round(3)
+
+adonis_table_pvalue <- data.frame(variable_tested,Adonis_pvalues)%>%
+  as.data.frame()%>%
+  rename("Parameter" = "variable_tested",
+         "p_value" = "Adonis_pvalues") %>%
+  Significante_indicator("p_value")
+
+
+write.table(adonis_table_pvalue,"adonis_centroid_test.tsv", sep="\t", row.names = F, quote = T )
+
+pairwise_table_day <- pairwise.adonis(rare_dist, meta_data_statistical_test$day)%>%
+  select(pairs,p.value,p.adjusted) %>%
+  rename("Pairs" = "pairs",
+         "p_value" = "p.value",
+         "p_value_adjusted"= "p.adjusted") %>%
+  Significante_indicator("p_value_adjusted")
+  
+  
+pairwise_table_d_Alk <- pairwise.adonis(rare_dist, meta_data_statistical_test$d_Alk) %>%
+  select(pairs,p.value,p.adjusted) %>%
+  rename("Pairs" = "pairs",
+         "p_value" = "p.value",
+         "p_value_adjusted"= "p.adjusted") %>%
+  Significante_indicator("p_value_adjusted")
+
+pairwise_table_Treatment <- pairwise.adonis(rare_dist, meta_data_statistical_test$Treatment) %>%
+  select(pairs,p.value,p.adjusted) %>%
+  rename("Pairs" = "pairs",
+         "p_value" = "p.value",
+         "p_value_adjusted"= "p.adjusted") %>%
+  Significante_indicator("p_value_adjusted")
+
+write.table(pairwise_table_day,"pairwise_posthoc_day.tsv", sep="\t", row.names = F, quote = T)
+write.table(pairwise_table_d_Alk,"pairwise_posthoc_d_Alk.tsv", sep="\t", row.names = F, quote = T)
+write.table(pairwise_table_Treatment,"pairwise_posthoc_Treatment.tsv", sep="\t", row.names = F, quote = T)
+
+
+#permdist
+permdist_results_day <- betadisper(rare_dist, meta_data_statistical_test$day)
+permdist_results_d_Alk <- betadisper(rare_dist, meta_data_statistical_test$d_Alk)
+permdist_results_treatment <- betadisper(rare_dist, meta_data_statistical_test$Treatment)
+
+#dispersion
+dispersion_anova_day <- anova(permdist_results_day)
+dispersion_anova_d_Alk <- anova(permdist_results_d_Alk)
+dispersion_anova_treatment <- anova(permdist_results_treatment)
+
+
+pvalues_dispersion <- round(rbind(dispersion_anova_d_Alk$`Pr(>F)`[1], dispersion_anova_day$`Pr(>F)`[1],dispersion_anova_treatment$`Pr(>F)`[1]),3)
+dispersion_parameters <- rbind("Added Alkalinity", "Time", "Treatment")
+dispersion_anova_table<- data.frame(dispersion_parameters,pvalues_dispersion) %>%
+  rename("Parameter" = "dispersion_parameters",
+         "p_value" = "pvalues_dispersion") %>%
+  Significante_indicator("p_value")
+
+write.table(dispersion_anova_table, "anova_dispersion.tsv", sep="\t", row.names = F, quote = T)
+
+
+colnames(dispersion_anova_table) <- c("Parameter","p-Value")
+
+#PostHoc Test
+
+
+
+tukey_table_day <- TukeyHSD(permdist_results_day)$group 
+
+tukey_table_day <- tukey_table_day %>%
+  as.data.frame()%>%
+  mutate(Group = rownames(tukey_table_day)) %>%
+  rename("p_value_adjusted" = "p adj") %>%
+  mutate(p_value_adjusted = round(p_value_adjusted, 3))%>% 
+  select(Group,p_value_adjusted) %>% 
+  Significante_indicator("p_value_adjusted") %>%
+  remove_rownames()
+
+Tukey_table_d_Alk <-TukeyHSD(permdist_results_d_Alk)$group
+
+Tukey_table_d_Alk <- Tukey_table_d_Alk %>%
+  as.data.frame() %>%
+  mutate(Group = rownames(Tukey_table_d_Alk)) %>%
+  rename("p_value_adjusted" = "p adj") %>%
+  mutate(p_value_adjusted = round(p_value_adjusted, 3))%>% 
+  select(Group,p_value_adjusted) %>% 
+  Significante_indicator("p_value_adjusted") %>%
+  remove_rownames()
+
+Tukey_table_treatment <-TukeyHSD(permdist_results_treatment)$group
+
+
+Tukey_table_treatment <- Tukey_table_treatment %>%
+  as.data.frame()%>%
+  mutate(Group = rownames(Tukey_table_treatment)) %>%
+  rename("p_value_adjusted" = "p adj") %>%
+  mutate(p_value_adjusted = round(p_value_adjusted, 3))%>% 
+  select(Group,p_value_adjusted) %>% 
+  Significante_indicator("p_value_adjusted") %>%
+  remove_rownames()
+
+ write.table(tukey_table_day, "Dispersion_posthoc_tukey_day.tsv", sep="\t", row.names = F, quote = T)
+ write.table(Tukey_table_d_Alk, "Dispersion_posthoc_tukey_d_Alk.tsv", sep="\t", row.names = F, quote = T)
+ write.table(Tukey_table_treatment, "Dispersion_posthoc_tukey_treatment.tsv", sep="\t", row.names = F, quote = T)
+
+```
+
+make k mean clustering with WSS elbow plot before hand
+```{r}
+
+PCoA_ordination <- PCoA_data_d_Alk[,1:2]
+
+
+Silhouette_plot <- fviz_nbclust(as.data.frame(PCoA_ordination), method = "silhouette", FUNcluster = kmeans)
+
+Sil_plot_data<- Silhouette_plot$data
+Sil_plot_data$clusters <- as.numeric(Sil_plot_data$clusters)
+
+Sil_plot_p<- ggplot(Sil_plot_data, aes(x= clusters, y =y, color ="steelblue" ))+ 
+  geom_point(aes(x= clusters, y=y) , color = "steelblue", size = 6)+
+  geom_vline( xintercept = 3, linewidth= 1, linetype= "dashed", color ="darkgrey")+
+  geom_line(aes(x= clusters, y =y), color = "steelblue", linewidth = 3)+
+  scale_x_continuous(limits = c(1,10), breaks = seq(1,10,1))+
+  theme(panel.grid = element_blank())+ 
+  labs(y="Silhouette Width", x = "Number of clusters"
+       , title = "Silhouette-Plot")+
+  theme(axis.text = element_text(size = 16))+
+  theme(axis.text = element_text(size = 16))+
+  theme(axis.title = element_text(size = 20))+
+  theme(plot.title = element_text(size = 24))
+  
+
+wss_plot <- fviz_nbclust(as.data.frame(PCoA_ordination), method = "wss", FUNcluster = kmeans) +
+  geom_line( linewidth = 2)+
+  geom_vline( xintercept = 3, linewidth= 0.5, linetype= "dashed", color ="steelblue")
+
+wssplot_data<- wss_plot$data
+wssplot_data$clusters <- as.numeric(wssplot_data$clusters)
+
+
+
+Wss_plot_p<- ggplot(wssplot_data, aes(x= clusters, y =y, color ="steelblue" ))+ 
+  geom_point(aes(x= clusters, y=y) , color = "steelblue", size = 6)+
+  geom_vline( xintercept = 3, linewidth= 1, linetype= "dashed", color ="darkgrey")+
+  geom_line(aes(x= clusters, y =y), color = "steelblue", linewidth = 3)+
+  scale_x_continuous(limits = c(1,10), breaks = seq(1,10,1))+
+  theme(panel.grid = element_blank())+ 
+  labs(y="Within-Cluster Sum of Squares", x = "Number of clusters"
+       , title = "Elbow-Plot")+
+  theme(axis.text = element_text(size = 16))+
+  theme(axis.text = element_text(size = 16))+
+  theme(axis.title = element_text(size = 20))+
+  theme(plot.title = element_text(size = 24))
+  
+
+ggsave("Wss_plot.png", Wss_plot_p, height = 8, width = 8)
+ggsave("Silhouette_plot.png",Sil_plot_p, height = 8, width = 8)
+
+
+
+
+KM <- kmeans(as.data.frame(PCoA_ordination),3)
+
+
+Kmeans_plot <- fviz_cluster(object = KM, as.data.frame(PCoA_ordination))
+
+meta_data_cluster <- Kmeans_plot$data
+
+meta_data_cluster$cluster <- as.factor(meta_data_cluster$cluster)
+
+meta_data_cluster_name <- meta_data_cluster %>%
+  mutate(cluster, case_when(
+    cluster == "3" ~ "Cluster 1",
+    cluster == "2" ~ "Cluster 2",
+    cluster == "1" ~ "Cluster 3" )) %>%
+  select(name,x,y,"case_when(...)") %>%
+  rename("Sample" = "name" ,
+         "cluster"="case_when(...)")
+
+#extract the data from the kmeans Plot
+
+#"cluster 1" ==  "early samples"
+#"cluster 2" == "late samples"
+#"cluster 3" == "mid samples"
+
+# write a for loop, which turn the values from cluster into the respective factors above
+
+
+
+KM$cluster <- meta_data_cluster_name$cluster
+
+Kmeans_plot <- fviz_cluster(object = KM, as.data.frame(PCoA_ordination))
+
+Kmeans_data <- Kmeans_plot$data 
+
+
+Kmeans_data$cluster <-factor(Kmeans_data$cluster, levels = c("Cluster 1", "Cluster 2", "Cluster 3"))
+
+
+meta_data_cluster_name$cluster <-factor(meta_data_cluster_name$cluster, levels = c("Cluster 1", "Cluster 2", "Cluster 3"))
+
+
+p_kmeans_3 <- ggplot(Kmeans_data, aes(x =x, y=y, color = cluster))+ 
+  geom_point(size = 4 ) + 
+  scale_color_manual(values=c("red4","lightgreen","lightblue"), aesthetics = c("color"))+
+  ggtitle("K-means Plot ~ Differences are best described by Time") +
+  ylab("Coordinates Y") + 
+  xlab("Coordinates X") +
+  theme(panel.grid = element_blank()) +
+  theme(strip.text = element_text(size = 14))+
+  theme(axis.text = element_text(size = 16))+
+  theme(axis.text = element_text(size = 16))+
+  theme(axis.title = element_text(size = 20))+
+  theme(plot.title = element_text(size = 24))+
+  theme(legend.title = element_text(size = 20 ))+
+  theme(legend.text = element_text(size= 16))
+
+
+p_kmeans_3
+
+ggsave("Kmeans_Plot_3.png",p_kmeans_3,width = 14, height = 8)  
+
+#merge the dataframe together with the meta data dataframe 
+meta_data_stackplot<- merge(meta_data,meta_data_cluster_name, by="Sample")
+meta_data_stackplot$cluster <- factor(meta_data_stackplot$cluster, levels = c("Cluster 1", "Cluster 2", "Cluster 3"))
+rownames(meta_data_stackplot) <- meta_data_stackplot$Sample
+
+Cor_Clust <- meta_data_stackplot
+
+Cor_Clust$cluster <- as.numeric(str_sub(Cor_Clust$cluster, -1, -1)) 
+Cor_Clust$day <- as.double(Cor_Clust$day)
+Cor_Clust$Chla_ng.l <- as.numeric(Cor_Clust$Chla_ng.l)
+
+cor(Cor_Clust$day, Cor_Clust$cluster, method = "spearman") 
+cor(Cor_Clust$day, Cor_Clust$d_Alk, method = "spearman" ) 
+cor(Cor_Clust$day, Cor_Clust$Chla_ng.l, method = "spearman" ) 
+
+#chisquare test to see which variables describe the clutering best.
+chiq_day <- (chisq.test(table(Cor_Clust$cluster, Cor_Clust$day)))
+chiq_d_Alk<- (chisq.test(table(Cor_Clust$cluster, Cor_Clust$d_Alk)))
+chiq_Treatment <- (chisq.test(table(Cor_Clust$cluster, Cor_Clust$Treatment)))
+
+
+```
+
+now we want to draw stacked barplots within the clusters. For this we need to load in the functions form my masterthesis, 
+which create tables and plots accordingly 
+
+```{r}
+#this function has as input a phyloseq object, a taxonomic rank, and filter factor. The taxonomic rank is the rank to which we want to accumulate  the counts. the filter factor is a filter which lumps taxonomics ranks which make up less then the value given. into a group called "others". 
+
+OTU_Table_For_Plot<- function(ASV_physeq, Tax_Rank, Filter_factor){
+  
+  ASV_Count_Table<- otu_table(tax_glom(ASV_physeq, taxrank = Tax_Rank))
+  Name_Vector <- as.vector(tax_table(tax_glom(ASV_physeq, taxrank = Tax_Rank))[,Tax_Rank])
+  
+  
+  rownames(ASV_Count_Table) <- Name_Vector
+  
+  unclassivied <- colSums(otu_table(ASV_physeq)) - colSums(ASV_Count_Table)
+  Counts_Plus_unidentivied <- rbind(ASV_Count_Table, "Unclassivied" = unclassivied)
+  
+  #calculate ratio
+  Prop <- apply(Counts_Plus_unidentivied, 2, function(x) x/sum(x)*100)
+  #filtering
+  not_filtered <- data.frame(Prop[apply(Prop, 1, max) > Filter_factor, ])
+  Filtered <- colSums(Prop) - colSums(not_filtered)
+  with_Others <- rbind(not_filtered, "Others" = Filtered)
+  return(with_Others)
+  dim(with_Others)
+}
+
+#this function takes the table from the function above and a metadata table. to plot stacked barplots. The ggplot #part of this function should be adjusted based on what factors exactly should be visualized. 
+#adjustments i made: I added "x$cluster" to be able to facet wrap the cluster
+
+Make_Bar_Plot_return_Plot <- function(with_Others,x){
+  with_Others$Major_Taxa <- rownames(with_Others)
+  with_Others.g <- gather(with_Others, Sample, Proportion, -Major_Taxa)
+  
+  Mergin_table <- data.frame("Sample"=row.names(x),  "d_Alk" = x$d_Alk,
+                             "day"= x$day, "Mesocosm"= x$Mesocosm,
+                             "Treatment"= x$Treatment, "cluster"=x$cluster)
+  
+  with_Others.g2 <- merge(with_Others.g, Mergin_table)
+  
+  Others_for_removal <- "Others"
+  no_others <- levels(as.factor(with_Others.g2$Major_Taxa))[!levels(as.factor(with_Others.g2$Major_Taxa))%in% Others_for_removal]
+  levels_append_Others<- as.factor(append(no_others,"Others"))
+  with_Others.g2$Major_Taxa <- factor(with_Others.g2$Major_Taxa
+                                      , levels = levels_append_Others)
+  b <- factor(with_Others.g2$Major_Taxa
+              , levels = levels_append_Others)
+  
+  
+  a <- ggplot(with_Others.g2, aes(x=as.factor(cluster), y=Proportion, fill=Major_Taxa)) +
+    geom_bar(width=0.6, stat="identity", na.rm = TRUE,position="fill") +
+    #facet_grid(~as.factor(cluster)) + 
+    scale_fill_viridis(discrete = TRUE, option = "D")
+  return(a)
+}
+
+Make_Bar_Plot_return_Plot_T0 <- function(with_Others,x){
+  with_Others$Major_Taxa <- rownames(with_Others)
+  with_Others.g <- gather(with_Others, Sample, Proportion, -Major_Taxa)
+  
+  Mergin_table <- data.frame("Sample"=row.names(x),  "d_Alk" = x$d_Alk,
+                             "day"= x$day, "Mesocosm"= x$Mesocosm)
+  
+  with_Others.g2 <- merge(with_Others.g, Mergin_table)
+  
+  Others_for_removal <- "Others"
+  no_others <- levels(as.factor(with_Others.g2$Major_Taxa))[!levels(as.factor(with_Others.g2$Major_Taxa))%in% Others_for_removal]
+  levels_append_Others<- as.factor(append(no_others,"Others"))
+  with_Others.g2$Major_Taxa <- factor(with_Others.g2$Major_Taxa
+                                      , levels = levels_append_Others)
+  b <- factor(with_Others.g2$Major_Taxa
+              , levels = levels_append_Others)
+  
+  with_Others.g2$Mesocosm <- factor(with_Others.g2$Mesocosm, levels = c("k1", "k2", "k3", "k4", "k5", "k6", "k8", "k9", "k10", "k11", "k12"))
+
+  
+  a <- ggplot(with_Others.g2, aes(x=as.factor(Mesocosm), y=Proportion, fill=Major_Taxa)) +
+    geom_bar(width=0.6, stat="identity", na.rm = TRUE,position="fill") +
+    #facet_grid(~as.factor(cluster)) + 
+    scale_fill_viridis(discrete = TRUE, option = "D")
+  return(a)
+}
+
+```
+now we run the two functions to visualize the stacked barplots with the clusters as facet. 
+
+```{r}
+#new phyloseq_object with T0 being finltered out 
+
+
+Phyloseq_kmeans <- phyloseq(otu_table(count_table_statistical_test, taxa_are_rows =T ),
+                    sample_data(meta_data_stackplot),
+                    tax_table(as.matrix(tax_table_filtered)))
+
+
+table_stacked_barplot <- OTU_Table_For_Plot(Phyloseq_kmeans,"phylum",3)
+p_community_kmeans_3 <- Make_Bar_Plot_return_Plot(table_stacked_barplot,meta_data_stackplot)+
+  ggtitle("Microbial community Phylum level ~ clusters") +
+  scale_y_continuous(expand = c(0,0))+
+  labs(fill= "Phylum ")+
+  theme(panel.grid = element_blank())
+  
+p_community_kmeans_3
+ggsave("Barplot_kmeans_3.png",p_community_kmeans_3, height = 8, width = 12)
+
+table_stacked_barplot <- OTU_Table_For_Plot(Phyloseq_kmeans,"order",6)
+p_community_order_kmeans_3 <- Make_Bar_Plot_return_Plot(table_stacked_barplot,meta_data_stackplot)+
+  ggtitle("Microbial community order level ~ clusters") +
+  scale_y_continuous(expand = c(0,0))+
+  labs(fill= "Order ") +
+  theme(panel.grid = element_blank())+
+  theme(strip.text = element_text(size = 14))+
+  theme(axis.title.x = element_blank())+
+  theme(axis.text = element_text(size = 16))+
+  theme(axis.title = element_text(size = 20))+
+  theme(plot.title = element_text(size = 24))+
+  theme(legend.title = element_text(size = 20 ))+
+  theme(legend.text = element_text(size= 16))
+
+p_community_order_kmeans_3
+ggsave("kmean_community_3_order.png", p_community_order_kmeans_3, height = 8, width = 12)
+```
+
+
+get the sequences to make a unifrac plot 
+```{r}
+sequences <- paste0(getwd(),"/ASVs.fa") 
+DNA_sequences <- readDNAStringSet(sequences,"fasta")
+
+
+tree <- msa(DNA_sequences, method = "ClustalOmega")%>%
+  as.DNAbin()%>%
+  dist.dna()%>%
+  nj()
+
+Phyloseq_rarefy_uni <- phyloseq(otu_table(count_table_statistical_test, taxa_are_rows =T ),
+                    sample_data(meta_data_statistical_test),
+                    tax_table(as.matrix(tax_table_filtered)))
+
+tree <- root(tree, outgroup = "ASV_626", resolve.root = T)
+phy_tree(Phyloseq_rarefy_uni) <- tree
+
+```
+
+plot the unifrac
+```{r}
+Unifrac_ordination <- ordinate(Phyloseq_rarefy_uni, "PCoA", "unifrac", weighted = F)
+unifrac_plot_uw<- plot_ordination(Phyloseq_rarefy_uni, Unifrac_ordination, color = "day", label = "d_Alk")
+
+unifrac_uw_data <- unifrac_plot_uw$data
+
+p_unweighted_unifrac <- ggplot(unifrac_uw_data, aes(x=Axis.1, y=Axis.2, color=day, label = d_Alk))+
+  geom_point(size=4)+
+  geom_text(aes(label=d_Alk), color="black", size=3, vjust=1.1)+
+  ggtitle("Unifrac unweighted PCoA ~ time") +
+  theme(panel.grid = element_blank())
+  
+
+p_unweighted_unifrac
+ggsave("Unifrac_unweighted.png", p_unweighted_unifrac, width = 12, height = 8 )
+
+Unifrac_ordination <- ordinate(Phyloseq_rarefy_uni, "PCoA", "unifrac", weighted = T)
+unifrac_plot_w <- plot_ordination(Phyloseq_rarefy_uni, Unifrac_ordination, color = "day", label = "d_Alk")
+
+unifrac_w_data <- unifrac_plot_w$data
+
+
+p_weighted_unifrac <- ggplot(unifrac_w_data, aes(x=Axis.1, y=Axis.2, color=day, label = d_Alk))+
+  geom_point(size=4)+
+  geom_text(aes(label=d_Alk), color="black", size=3, vjust=1.1)+
+  ggtitle("Unifrac weighted PCoA ~ time") +
+  theme(panel.grid = element_blank())+
+  labs(color = "Incubation Time")+ 
+  theme(strip.text = element_text(size = 14))+
+  theme(axis.text = element_text(size = 16))+
+  theme(axis.text = element_text(size = 16))+
+  theme(axis.title = element_text(size = 20))+
+  theme(plot.title = element_text(size = 24))+
+  theme(legend.title = element_text(size = 20 ))+
+  theme(legend.text = element_text(size= 16))
+
+p_weighted_unifrac
+ggsave("Unifrac_weighted.png", p_weighted_unifrac, width = 12, height = 8 )
+
+
+
+```
+
+```{r}
+# unifrac statistics 
+
+unifrac_distance_weighted <- phyloseq::distance(Phyloseq_rarefy_uni, method = "unifrac", weighted= T)
+
+#centroid adonis ----
+adonis_table_unifrac_d_alk <- adonis2(unifrac_distance_weighted~d_Alk, data=meta_data_statistical_test, permutations = 1000)
+adonis_table_unifrac_day <- adonis2(unifrac_distance_weighted~day, data=meta_data_statistical_test, permutations = 1000)
+adonis_table_unifrac_treatment <- adonis2(unifrac_distance_weighted~Treatment, data=meta_data_statistical_test, permutations = 1000)
+
+
+variable_tested <- cbind(c("Added Alkalinity","Time", "Treatment"))
+Adonis_pvalues <- cbind(c(adonis_table_unifrac_d_alk$`Pr(>F)`[1],
+                          adonis_table_unifrac_day$`Pr(>F)`[1],
+                          adonis_table_unifrac_treatment$`Pr(>F)`[1]))  %>%
+  round(3)
+
+adonis_table_pvalue_unifrac <- data.frame(variable_tested, Adonis_pvalues)%>%
+  as.data.frame()%>%
+  rename("Parameter" = "variable_tested",
+         "p_value" = "Adonis_pvalues") %>%
+  Significante_indicator("p_value")
+
+
+write.table(adonis_table_pvalue_unifrac,"adonis_centroid_test_unifrac.tsv", sep="\t", row.names = F, quote = T )
+
+
+#pairwise Adonis----
+
+pairwise_table_day_uni_table <- pairwise.adonis(unifrac_distance_weighted, meta_data_statistical_test$day) %>%
+  select(pairs,p.value,p.adjusted) %>%
+  rename("Pairs" = "pairs",
+         "p_value" = "p.value",
+         "p_value_adjusted"= "p.adjusted") %>%
+  Significante_indicator("p_value_adjusted")
+
+write.table(pairwise_table_day_uni_table,"posthoc_day_adonis_uni.tsv", sep = "\t")
+
+pairwise_table_d_alk_uni_table <- pairwise.adonis(unifrac_distance_weighted, meta_data_statistical_test$d_Alk) %>%
+  select(pairs,p.value,p.adjusted) %>%
+  rename("Pairs" = "pairs",
+         "p_value" = "p.value",
+         "p_value_adjusted"= "p.adjusted") %>%
+  Significante_indicator("p_value_adjusted")
+
+
+write.table(pairwise_table_d_alk_uni_table,"posthoc_d_alk_adonis_uni.tsv", sep = "\t")
+
+
+permdist_results_day_uni <- betadisper(unifrac_distance_weighted, meta_data_statistical_test$day)
+permdist_results_d_Alk_uni <- betadisper(unifrac_distance_weighted, meta_data_statistical_test$d_Alk)
+permdist_results_treatment_uni <- betadisper(unifrac_distance_weighted, meta_data_statistical_test$Treatment)
+
+anova(permdist_results_day_uni)
+anova(permdist_results_d_Alk_uni)
+anova(permdist_results_treatment_uni)
+
+#dispersion
+dispersion_anova_day_uni <- anova(permdist_results_day_uni)
+dispersion_anova_d_Alk_uni <- anova(permdist_results_d_Alk_uni)
+dispersion_anova_treatment_uni <- anova(permdist_results_treatment_uni)
+
+
+
+pvalues_dispersion <- round(rbind(dispersion_anova_d_Alk_uni$`Pr(>F)`[1], dispersion_anova_day_uni$`Pr(>F)`[1],dispersion_anova_treatment_uni$`Pr(>F)`[1]),3)
+dispersion_parameters <- rbind("Added Alkalinity", "Time", "Treatment")
+dispersion_anova_table_uni<- data.frame(dispersion_parameters,pvalues_dispersion) %>%
+  rename("Parameter" = "dispersion_parameters",
+         "p_value" = "pvalues_dispersion") %>%
+  Significante_indicator("p_value")
+
+write.table(dispersion_anova_table_uni, "unifrac_dispersion_anova.tsv", sep = "\t")
+
+
+```
+
+analysis of proteobacteria 
+```{r}
+
+tax_table_proteo <- subset(tax_table_filtered,phylum=="Proteobacteria") 
+count_table_proteo <- count_table_filtered_sqrt[rownames(count_table_filtered_sqrt) %in% rownames(tax_table_proteo),]
+
+phyloseq_prote <-phyloseq(otu_table(count_table_proteo, taxa_are_rows =T ),
+                    sample_data(meta_data_statistical_test),
+                    tax_table(as.matrix(tax_table_proteo)))
+
+
+proteo_table_barplot <- OTU_Table_For_Plot(phyloseq_prote,"order",10)
+Proteo_order_plot<- Make_Bar_Plot_return_Plot(proteo_table_barplot,meta_data_stackplot)+
+  scale_y_continuous(expand = c(0,0))+
+  labs(fill= "Order", x = "Cluster")+
+  ggtitle("Proteobacteria ~ Order level")+
+  theme(panel.grid = element_blank())+
+  theme(strip.text = element_text(size = 14))+
+  theme(axis.title.x = element_blank())+
+  theme(axis.text = element_text(size = 16))+
+  theme(axis.title = element_text(size = 20))+
+  theme(plot.title = element_text(size = 24))+
+  theme(legend.title = element_text(size = 20 ))+
+  theme(legend.text = element_text(size= 16))
+
+Proteo_order_plot
+ggsave("Proteobacteria_Order.png", Proteo_order_plot, height = 8, width = 12)
+
+
+```
+make a barplot describing the t0 samples, so everyone can see what is in the beginning of the experiment in the mesocosms
+
+```{r}
+
+meta_data_t0 <- meta_data %>%
+  filter(startsWith(Sample,"T0")) 
+
+count_table_t0 <- count_table_rarefyed[,colnames(count_table_rarefyed) %in% rownames(meta_data_t0)]
+
+Phyloseq_t0 <- phyloseq(otu_table(count_table_t0, taxa_are_rows =T ),
+                    sample_data(meta_data_t0),
+                    tax_table(as.matrix(tax_table_filtered)))
+
+OTU_table_t0<- OTU_Table_For_Plot(Phyloseq_t0,"order",5)
+T0_community<- Make_Bar_Plot_return_Plot_T0(OTU_table_t0,meta_data_t0)+
+  scale_y_continuous(expand = c(0,0))+
+  labs(fill= "Order", x = "Mesocosm")+
+  ggtitle("Communitys at t0 ~ Order level")+
+  theme(panel.grid = element_blank())
+T0_community
+```
+  
