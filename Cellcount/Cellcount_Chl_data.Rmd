@@ -1,0 +1,374 @@
+---
+title: "ReTake_Cellcounts"
+author: "Dominik"
+date: "2024-07-05"
+output: html_document
+---
+
+install the packages
+```{r}
+install.packages("tidyverse")
+install.packages("ragg")
+install.packages("textshaping")
+```
+
+load packages
+```{r}
+library("ggplot2")
+library("tidyverse")
+library("forcats")
+library("cowplot")
+library("dplyr")
+```
+
+Set the working directory to the file on you pc, where the "cellcount_data.csv" file is located and import the file into R
+here you need to change the code in the setwd() function to make it work.
+
+```{r}
+setwd("C:/Users/Domin/Desktop/Files/Retake")# change directory here
+Count_data_raw <- read.csv("cellcount_data.csv", sep ="\t" )
+Chla <- read.csv("Chla.csv", sep ="\t", fileEncoding = "ISO-8859-1" )
+Chla <- Chla[1:5]
+
+```
+
+manipulate the table so it is nicely plotable in GGplot 
+
+```{r}
+Count_data <- as.data.frame(t(Count_data_raw))# transpose it is for me more comfortable to have the mesocosms as columns and the day as rows
+colnames(Count_data) <- Count_data[1,]# change the colnames accordingly to the mesocosm treatment
+Count_data <- Count_data[-1,] #remove the first column
+
+Day <- rownames(Count_data) #extract the rownames
+Day_order <- substr(Day,2,nchar(Day))# and order them
+Treatment_order <- c("0 D","250 D","500 D", "750 D", "1000 D", "1250 D", "0 I","250 I","500 I", "750 I", "1000 I", "1250 I") # also order the Treatments 
+
+Plot_df<- cbind(Count_data,Day_order)
+Plot_df_tidy <- Plot_df %>% 
+  pivot_longer(cols = colnames(Count_data) , names_to = "Treatment", values_to = "Value") %>%
+  mutate(Alkalinity = str_sub(Treatment, 1, -2))
+
+df_key <- data.frame(
+  MK = c("K1", "K2", "K3", "K4", "K5", "K6", "K7", "K8", "K9", "K10", "K11", "K12"),
+  Tr = c("500 I", "1250 D", "750 I", "500 D", "1000 I", "0 D", "250 I", "750 D", "0 I", "250 D", "1250 I", "1000 D")
+)
+
+Mesocosm <- sapply(Plot_df_tidy$Treatment, function(x) {
+  match_index <- which(df_key$Tr == x)  # Find the index of the match in col2
+  if (length(match_index) > 0) {
+    return(df_key$MK[match_index])  # Replace with corresponding value from col1
+  } else {
+    return(x)  # If no match is found, return the original value
+  }
+})
+
+Plot_df_tidy_Chl <- Plot_df_tidy %>%
+  mutate(Mesocosm = Mesocosm)%>%
+  mutate(Sample_ID = paste0(Mesocosm,"_T",Day_order))
+
+rm(Mesocosm)
+
+df_Plot <- merge(Plot_df_tidy_Chl,Chla,"Sample_ID") %>%
+  select("Sample_ID","Mesocosm.y","Treatment.x","Value","Alkalinity","Day","total_chla_µg.l")%>%
+  mutate(Day = substring(Day, 2))
+
+colnames(df_Plot) <- c("ID","Mesocosm","Treatment","Cellcount","Alkalinity","Incubation_Time","Chla")
+df_Plot$Treatment <- factor(df_Plot$Treatment)
+
+
+df_Plot$Treatment <- factor(df_Plot$Treatment, levels = Treatment_order )
+df_Plot$Cellcount <- as.numeric(df_Plot$Cellcount) 
+df_Plot$Incubation_Time <- as.integer(df_Plot$Incubation_Time)
+df_Plot$Alkalinity <- factor(df_Plot$Alkalinity, levels = c("0 ", "250 ", "500 ", "750 ","1000 ","1250 "))
+
+
+```
+Program the lines types and the colors for the different treatments
+```{r}
+line_type <- c("0 D"= "dashed","250 D" = "dashed","500 D"= "dashed", "750 D"= "dashed", 
+                 "1000 D" = "dashed","1250 D"= "dashed", "0 I" = "solid", "250 I" = "solid", 
+                 "500 I" = "solid", "750 I" = "solid","1000 I" = "solid","1250 I" = "solid") 
+
+color_scheme <- c("#A6D96A", "#83DD8F","#1ABD63", "#008E4A", "#007200", "#1B4332",
+                              "#90E0EF","#00B4D8" ,"#4393C2", "#0077B6", "#0466C8", "#03045E")
+```
+
+Plot the cellcount Grapth
+```{r}
+Cellcount_plot<- ggplot(df_Plot, aes(Incubation_Time, Cellcount, color = Treatment), ylab="Cells / µL", linetype = line_type) +
+  scale_color_manual(values=color_scheme) +
+  geom_point(group=df_Plot$Cellcount, size = 5) + 
+  geom_line(linewidth = 2) +
+  scale_shape_manual(values=c(25,23,22,21,24,8,25,23,22,21,24,8)) +
+  scale_linetype_manual()+
+  scale_y_continuous(limits = c(0,4000))+
+  labs(x="Day", y="Cells / µL", title = "Prokaryotic Cellcounts" )+
+  theme(panel.grid = element_blank())+
+  theme(axis.title = element_text(size = 20))+
+  theme(axis.text = element_text(size = 16))+ 
+  theme(legend.title = element_text(size = 20))+
+  theme(legend.text = element_text(size = 16))
+```
+
+save the plot in the working directory
+```{r}
+ggsave("Cellcount_plot.png", Cellcount_plot, dpi = 300, width = 18, height = 14)
+
+```
+
+plot the treatment as a facet 
+
+```{r}
+Cellcount_plot_facet<- ggplot(df_Plot, aes(Incubation_Time, Cellcount, color = Treatment), ylab="Cells / µL", linetype = line_type) +
+  scale_color_manual(values=color_scheme) +
+  geom_point(group=df_Plot$Cellcount, size = 5) + 
+  geom_line(linewidth = 2) +
+  scale_shape_manual(values=c(25,23,22,21,24,8,25,23,22,21,24,8)) +
+  scale_linetype_manual()+
+  scale_y_continuous(limits = c(0,4000))+
+  labs(x="Day", y="Cells / µL", title = "Bacterial Cellcounts" )+
+  theme(panel.grid = element_blank())+
+  theme(axis.title = element_text(size = 20))+
+  theme(axis.text = element_text(size = 16))+ 
+  theme(legend.title = element_text(size = 20))+
+  theme(legend.text = element_text(size = 16))+
+  theme(strip.text = element_text(size = 14))+ 
+  facet_wrap(~Alkalinity)
+
+```
+
+save the facet plot 
+
+```{r}
+ggsave("Cellcount_plot_facet.png", Cellcount_plot_facet, dpi = 300, width = 18, height = 14)
+
+```
+
+
+
+chlorophyl facet
+
+```{r}
+Chla_plot_facet<- ggplot(df_Plot, aes(Incubation_Time, Chla, color = Treatment), ylab="Chla", linetype = line_type) +
+  scale_color_manual(values=color_scheme) +
+  geom_point(group=df_Plot$Chla, size = 5) + 
+  geom_line(linewidth = 2) +
+  scale_shape_manual(values=c(25,23,22,21,24,8,25,23,22,21,24,8)) +
+  scale_linetype_manual()+
+  scale_y_continuous(limits = c(0,12))+
+  labs(x="Day", y="µg / L", title = "Chlorophyll" )+
+  theme(panel.grid = element_blank())+
+  theme(axis.title = element_text(size = 20))+
+  theme(axis.text = element_text(size = 16))+ 
+  theme(legend.title = element_text(size = 20))+
+  theme(legend.text = element_text(size = 16))+
+  theme(strip.text = element_text(size = 14))+
+  facet_wrap(~Alkalinity)
+
+```
+
+Plots verbinden 
+
+```{r}
+
+#Chla_plot_facet 
+#Cellcount_plot_facet
+
+#adjust legend size
+
+Chla_plot_facet <- Chla_plot_facet + 
+  theme(legend.text = element_text(size = 12),legend.title = element_text(size = 14))+
+  theme(axis.title.x = element_blank())+
+  theme(plot.title = element_text(size =25))+
+  labs(color="Mesocom")
+
+
+Cellcount_plot_facet <- Cellcount_plot_facet +
+  theme(plot.title = element_text(size =25))
+
+
+Chla_plot_facet <- Chla_plot_facet + theme(
+  legend.key.size = unit(1.5, "cm")         # Adjust key size (increase the number to make it larger)
+)
+
+legend <- get_legend(Chla_plot_facet + theme(legend.position = "right"))
+
+#remove legend from facet plots
+
+Chla_no_legend <- Chla_plot_facet + theme(legend.position = "none")
+cell_no_legend <- Cellcount_plot_facet + theme(legend.position = "none")
+
+#make final plot
+
+final_Plot<- plot_grid(
+  plot_grid(Chla_no_legend,cell_no_legend, ncol = 1),
+  legend,
+  rel_widths = c(3,1)
+)
+
+
+```
+save last Plot
+
+```{r}
+
+ggsave("facet_plot.png", final_Plot, dpi = 300, width = 18, height = 14)
+
+
+```
+
+Code to visualize incubation time where cellcount and chla peak 
+```{r}
+peaks <- df_Plot %>%
+  group_by(Mesocosm) %>%
+  summarize(
+    Peak_Day_Cellcount = Incubation_Time[which.max(Cellcount)],
+    Peak_Cellcount = max(Cellcount, na.rm = TRUE),
+    Peak_Day_Chla = Incubation_Time[which.max(Chla)],
+    Peak_Chla = max(Chla, na.rm = TRUE)
+  )%>%
+  mutate(delay = Peak_Day_Cellcount - Peak_Day_Chla)
+
+peak_treatment <- df_key %>%
+  rename(
+    "Mesocosm" = "MK",
+    "Treatment" = "Tr"
+  )
+
+peaks_table<- merge(peaks,peak_treatment, by ="Mesocosm")
+
+peaks_average_alk <- peaks_table%>%
+  mutate(
+    Alkalinity = substr(Treatment, 1, nchar(Treatment) - 2  )) %>%
+  mutate(Alkalinity = as.numeric(Alkalinity)) %>%
+  group_by(Alkalinity) %>%
+  summarize(
+    mean_cell <- mean(Peak_Day_Cellcount),
+    mean_chl <- mean(Peak_Day_Chla)
+    )
+
+peaks_table_500 <- peaks_table %>%
+  mutate(
+    Alkalinity = substr(Treatment, 1, nchar(Treatment) - 2  )) %>%
+  mutate(Alkalinity = as.numeric(Alkalinity)) %>%
+  filter(Alkalinity <= 500)%>%
+  group_by(Alkalinity) %>%
+  summarize(
+    mean_delay = mean(delay)
+  )
+
+write.table(peaks_average_alk,"peak_table.csv", sep = "\t")
+
+
+```
+
+plot 2 y-achsis
+```{r}
+
+
+scale_factor <- max(df_Plot$Chla)/max(df_Plot$Cellcount)
+
+data_2y <- df_Plot %>%
+  mutate(Cellcount_scale = Cellcount*scale_factor )
+
+
+Treatment_order_y2 <- c("0 D","250 D","500 D", "0 I","250 I","500 I", "750 D","1000 D","1250 D", "750 I","1000 I","1250 I") 
+
+
+data_2y$Treatment <- factor(data_2y$Treatment, levels = Treatment_order)
+
+Plot2y<- ggplot(data_2y, aes(x = Incubation_Time, y = Cellcount)) +
+  geom_line(aes(y= Cellcount_scale, color = "Cellcount"), linetype = "solid", linewidth = 3)+
+  geom_line(aes(y= Chla, color = "Chla"), linetype= "solid", linewidth = 3)+
+  scale_y_continuous(
+    name= expression( "ChlA (µg L"^-1*")" ),
+    sec.axis = sec_axis(~./scale_factor, name= expression("N (µL"^-1*")")))+
+  scale_color_manual(values = c("Cellcount" = "tomato4",
+                                 "Chla" = "darkcyan" ))+
+  labs(x ="Day", title = "Chlorophyll and Cellcounts")+
+    theme(
+    axis.title.y = element_text(size = 22, face = "bold", margin = margin(r = 15)),  # Primary y-axis
+    axis.title.y.right = element_text(size = 22, face = "bold", margin = margin(l = 15)),  
+    panel.grid = element_blank(),
+    axis.text = element_text(size = 20),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 20),
+    strip.text = element_text(size = 16),
+    title = element_text(size = 22, face = "bold"),
+    panel.spacing = unit(1, "lines")
+  ) +
+  facet_wrap(~Treatment, ncol = 3, nrow=4)
+
+ 
+ggsave("2Yplot.png", Plot2y, dpi = 300, width = 18, height = 14)
+
+```
+
+Plots carbonate
+
+```{r}
+
+TA_data <- read.csv("TA.csv", sep =";" )
+ph_data <- read.csv("pH.csv", sep =";" )
+
+colnames(ph_data) <- c("Day","0 D","1000 D","1250 D", "250 D","500 D","750 D", "0 I","1000 I","1250 I", "250 I","500 I","750 I")
+
+
+colnames(TA_data) <- c("Day","0 D","1000 D","1250 D", "250 D","500 D","750 D", "0 I","1000 I","1250 I", "250 I","500 I","750 I")
+
+TA_data$`1250 D` <- as.numeric(TA_data$`1250 D`)
+
+TA_plot_table <- TA_data[1:13] %>%
+    pivot_longer(
+    cols = -Day,      # or specify: cols = c("Control", "Alkalinity", ...)
+    names_to = "Treatment",
+    values_to = "TA"
+  )
+
+
+
+pH_plot_table <- ph_data[1:13] %>%
+    pivot_longer(
+    cols = -Day,      # or specify: cols = c("Control", "Alkalinity", ...)
+    names_to = "Treatment",
+    values_to = "pH"
+  )
+
+
+pH_plot_table$Treatment <- factor(pH_plot_table$Treatment, levels = Treatment_order )
+TA_plot_table$Treatment <- factor(TA_plot_table$Treatment, levels = Treatment_order )
+
+
+plot_ph<-ggplot(pH_plot_table, aes(x = Day, y= pH, color = Treatment))+ 
+  geom_point(size=3)+
+  geom_line(linewidth = 1.5)+
+  scale_color_manual(values=color_scheme) +
+  scale_linetype_manual()+
+  labs(x="Day", y="pH", title="Measured pH ~ Mesocosms")+
+  theme(panel.grid = element_blank())+
+  theme(axis.title = element_text(size = 20))+
+  theme(axis.text = element_text(size = 16))+ 
+  theme(legend.title = element_text(size = 20))+
+  theme(legend.text = element_text(size = 16))+
+  theme(strip.text = element_text(size = 14))+
+  theme(title= element_text(size = 20))
+
+plot_TA<- ggplot(TA_plot_table, aes(x = Day, y= TA, color = Treatment))+ 
+  geom_point(size=3)+
+  geom_line(linewidth = 1.5)+
+  scale_color_manual(values=color_scheme) +
+  scale_linetype_manual()+
+  labs(x="Day", y="delta Alkalinity [µmol / Litre]", title="Measured delta Alkalinity ~ Mesocosms")+
+  theme(panel.grid = element_blank())+
+  theme(axis.title = element_text(size = 20))+
+  theme(axis.text = element_text(size = 16))+ 
+  theme(legend.title = element_text(size = 20))+
+  theme(legend.text = element_text(size = 16))+
+  theme(strip.text = element_text(size = 14))+
+  theme(title= element_text(size = 20))
+
+ggsave("TA.png", plot_TA, dpi = 300, width = 14, height = 10)
+ggsave("ph.png", plot_ph, dpi = 300, width = 14, height = 10)
+
+
+```
